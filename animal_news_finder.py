@@ -1,39 +1,308 @@
 #!/usr/bin/env python3
 """
-動物新聞搜尋器 - Animal News Finder
-搜尋關於動物、動物福利、動物研究的新聞，以中文輸出結果。
+動物新聞監測器 - Animal News Monitor
+專為動保團體設計，監測五大動物類別的新聞：
+伴侶動物、農場動物、實驗動物、展演動物、經濟動物
+
+支援語言：英文（預設）、日文、韓文、中文
 """
 
 import argparse
 import json
 import sys
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
 
-# 搜尋關鍵字（中英文）
+# ============================================================
+# 語言設定
+# ============================================================
+LANGUAGES = {
+    "en": {
+        "name": "English（英文）",
+        "google_params": "hl=en&gl=US&ceid=US:en",
+        "bing_params": "mkt=en-US",
+    },
+    "ja": {
+        "name": "日本語（日文）",
+        "google_params": "hl=ja&gl=JP&ceid=JP:ja",
+        "bing_params": "mkt=ja-JP",
+    },
+    "ko": {
+        "name": "한국어（韓文）",
+        "google_params": "hl=ko&gl=KR&ceid=KR:ko",
+        "bing_params": "mkt=ko-KR",
+    },
+    "zh": {
+        "name": "中文（繁體）",
+        "google_params": "hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "bing_params": "mkt=zh-TW",
+    },
+}
+
+# ============================================================
+# 五大動物類別關鍵字（依語言分組）
+# ============================================================
 KEYWORD_CATEGORIES = {
-    "動物一般": [
-        "動物新聞", "野生動物", "寵物", "瀕危物種",
-        "animal news", "wildlife", "endangered species",
-    ],
-    "動物福利": [
-        "動物福利", "動物保護", "動物權益", "動物收容所", "流浪動物",
-        "animal welfare", "animal rights", "animal rescue",
-    ],
-    "動物研究": [
-        "動物研究", "動物行為", "動物科學", "生態研究", "動物醫學",
-        "animal research", "animal science", "zoology",
-    ],
+    "伴侶動物": {
+        "en": [
+            "companion animal news",
+            "pet welfare legislation",
+            "stray dog cat rescue",
+            "animal shelter adoption",
+            "pet abuse cruelty case",
+            "dog cat abandonment news",
+            "TNR stray animal policy",
+        ],
+        "ja": [
+            "ペット ニュース 動物愛護",
+            "犬猫 殺処分 保護",
+            "コンパニオンアニマル 福祉",
+            "野良猫 TNR 地域猫",
+            "ペット 虐待 事件",
+            "動物愛護法 改正",
+        ],
+        "ko": [
+            "반려동물 뉴스",
+            "유기동물 보호",
+            "동물학대 사건",
+            "반려동물 복지 정책",
+            "길고양이 TNR",
+            "동물보호법",
+        ],
+        "zh": [
+            "伴侶動物 新聞",
+            "流浪動物 收容 救援",
+            "寵物 虐待 案件",
+            "動物保護法 修法",
+            "TNR 流浪貓狗",
+            "動物收容所 領養",
+        ],
+    },
+    "農場動物": {
+        "en": [
+            "farm animal welfare news",
+            "factory farming cruelty",
+            "cage-free eggs legislation",
+            "pig gestation crate ban",
+            "poultry chicken welfare",
+            "livestock slaughter regulations",
+            "dairy cow welfare standards",
+            "farm animal abuse investigation",
+        ],
+        "ja": [
+            "畜産動物 アニマルウェルフェア",
+            "養鶏 バタリーケージ 廃止",
+            "豚 妊娠ストール 禁止",
+            "畜産 動物福祉 基準",
+            "と畜 動物虐待",
+            "アニマルウェルフェア 畜産 ニュース",
+        ],
+        "ko": [
+            "농장동물 복지 뉴스",
+            "공장식 축산 동물학대",
+            "산란계 케이지프리",
+            "축산 동물복지 인증",
+            "가축 도축 규정",
+            "동물복지 축산농장",
+        ],
+        "zh": [
+            "農場動物 福利 新聞",
+            "格子籠 蛋雞 廢除",
+            "母豬 狹欄 禁止",
+            "畜牧 動物福利 標準",
+            "屠宰 人道 規範",
+            "工廠化農場 虐待",
+        ],
+    },
+    "實驗動物": {
+        "en": [
+            "animal testing news",
+            "laboratory animal welfare",
+            "animal experiment alternatives",
+            "3Rs replacement reduction refinement",
+            "cosmetic animal testing ban",
+            "primate research controversy",
+            "FDA animal testing policy",
+            "lab animal rescue release",
+        ],
+        "ja": [
+            "動物実験 ニュース",
+            "実験動物 代替法",
+            "動物実験 廃止 3R",
+            "化粧品 動物実験 禁止",
+            "霊長類 実験 批判",
+            "実験動物 福祉",
+        ],
+        "ko": [
+            "동물실험 뉴스",
+            "실험동물 대체법",
+            "동물실험 금지 화장품",
+            "실험동물 복지",
+            "동물실험 3R 원칙",
+            "실험동물 해방",
+        ],
+        "zh": [
+            "動物實驗 新聞",
+            "實驗動物 替代方案",
+            "化妝品 動物實驗 禁止",
+            "3R原則 實驗動物",
+            "靈長類 實驗 爭議",
+            "實驗動物 福利",
+        ],
+    },
+    "展演動物": {
+        "en": [
+            "zoo animal welfare news",
+            "aquarium dolphin captivity",
+            "circus animal ban",
+            "marine park orca whale welfare",
+            "animal performance entertainment ban",
+            "captive wildlife welfare",
+            "zoo accreditation animal abuse",
+            "elephant ride tourism ban",
+        ],
+        "ja": [
+            "動物園 動物福祉 ニュース",
+            "水族館 イルカ 飼育 問題",
+            "サーカス 動物 禁止",
+            "動物ショー 廃止",
+            "展示動物 福祉 基準",
+            "象 ライド 観光 禁止",
+        ],
+        "ko": [
+            "동물원 동물복지 뉴스",
+            "수족관 돌고래 사육",
+            "서커스 동물 금지",
+            "동물 공연 전시 폐지",
+            "전시동물 복지",
+            "동물원 학대 논란",
+        ],
+        "zh": [
+            "動物園 動物福利 新聞",
+            "水族館 海豚 圈養",
+            "馬戲團 動物 禁令",
+            "動物展演 表演 廢除",
+            "展演動物 福利 標準",
+            "騎象 觀光 禁止",
+        ],
+    },
+    "經濟動物": {
+        "en": [
+            "fur farming ban news",
+            "wildlife trade illegal trafficking",
+            "ivory trade ban enforcement",
+            "shark fin trade ban",
+            "bear bile farming ban",
+            "animal skin leather industry welfare",
+            "fishing bycatch marine animal",
+            "bushmeat wildlife poaching",
+            "foie gras ban news",
+        ],
+        "ja": [
+            "毛皮 ファーファーミング 禁止",
+            "野生動物 取引 密売",
+            "象牙 取引 禁止",
+            "フカヒレ 取引 規制",
+            "熊胆 養殖 廃止",
+            "フォアグラ 禁止 ニュース",
+            "混獲 海洋動物 保護",
+        ],
+        "ko": [
+            "모피 농장 금지 뉴스",
+            "야생동물 거래 밀매",
+            "상아 거래 금지",
+            "상어 지느러미 규제",
+            "곰 담즙 농장 폐지",
+            "푸아그라 금지",
+            "혼획 해양동물 보호",
+        ],
+        "zh": [
+            "皮草 養殖 禁令 新聞",
+            "野生動物 貿易 走私",
+            "象牙 交易 禁令",
+            "魚翅 交易 禁止",
+            "熊膽 養殖 廢除",
+            "鵝肝醬 禁令",
+            "混獲 海洋動物 保護",
+        ],
+    },
+}
+
+CATEGORY_DESCRIPTIONS = {
+    "伴侶動物": "Companion Animals — 寵物、流浪動物、收容所、TNR、虐待案件",
+    "農場動物": "Farm Animals — 畜牧業、格子籠、狹欄、屠宰、動物福利認證",
+    "實驗動物": "Laboratory Animals — 動物實驗、替代方案、3R原則、實驗禁令",
+    "展演動物": "Performing/Exhibition Animals — 動物園、水族館、馬戲團、動物表演",
+    "經濟動物": "Economic Animals — 皮草、野生動物貿易、象牙、魚翅、熊膽",
 }
 
 
-def search_google_news(query, num_results=5):
+def prompt_language_selection():
+    """互動式語言選擇"""
+    print("\n" + "=" * 60)
+    print("🌐 動物新聞監測器 — Animal News Monitor")
+    print("   專為動保團體設計的新聞監測工具")
+    print("=" * 60)
+    print("\n請選擇要搜尋的新聞語言 / Select news language:\n")
+    print("  [1] 🇺🇸 English（英文）        ← 預設 / Default")
+    print("  [2] 🇯🇵 日本語（日文）")
+    print("  [3] 🇰🇷 한국어（韓文）")
+    print("  [4] 🇹🇼 中文（繁體中文）")
+    print("  [5] 🌍 全部語言（All languages）")
+    print()
+
+    choice = input("請輸入選項 (1-5) [預設: 1]: ").strip()
+
+    lang_map = {
+        "1": ["en"],
+        "2": ["ja"],
+        "3": ["ko"],
+        "4": ["zh"],
+        "5": ["en", "ja", "ko", "zh"],
+        "": ["en"],
+    }
+
+    selected = lang_map.get(choice, ["en"])
+    names = [LANGUAGES[lang]["name"] for lang in selected]
+    print(f"\n✅ 已選擇：{', '.join(names)}\n")
+    return selected
+
+
+def prompt_category_selection():
+    """互動式類別選擇"""
+    print("請選擇要監測的動物類別 / Select animal categories:\n")
+    categories = list(KEYWORD_CATEGORIES.keys())
+    for i, cat in enumerate(categories, 1):
+        print(f"  [{i}] {cat} — {CATEGORY_DESCRIPTIONS[cat]}")
+    print(f"  [6] 🔍 全部類別（All categories）")
+    print()
+
+    choice = input("請輸入選項，可多選以逗號分隔 (例: 1,2,4) [預設: 6]: ").strip()
+
+    if not choice or choice == "6":
+        return categories
+
+    selected = []
+    for c in choice.split(","):
+        c = c.strip()
+        if c.isdigit() and 1 <= int(c) <= 5:
+            selected.append(categories[int(c) - 1])
+
+    if not selected:
+        return categories
+
+    print(f"\n✅ 已選擇：{', '.join(selected)}\n")
+    return selected
+
+
+def search_google_news(query, lang="en", num_results=5):
     """透過 Google News RSS 搜尋新聞"""
     encoded_query = urllib.parse.quote(query)
-    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    params = LANGUAGES[lang]["google_params"]
+    url = f"https://news.google.com/rss/search?q={encoded_query}&{params}"
 
     headers = {
         "User-Agent": (
@@ -61,6 +330,7 @@ def search_google_news(query, num_results=5):
                 "來源": source,
                 "發布日期": pub_date,
                 "連結": link,
+                "語言": LANGUAGES[lang]["name"],
             })
         return results
     except requests.RequestException as e:
@@ -68,10 +338,11 @@ def search_google_news(query, num_results=5):
         return []
 
 
-def search_bing_news(query, num_results=5):
+def search_bing_news(query, lang="en", num_results=5):
     """透過 Bing News RSS 搜尋新聞（備用來源）"""
     encoded_query = urllib.parse.quote(query)
-    url = f"https://www.bing.com/news/search?q={encoded_query}&format=rss&mkt=zh-TW"
+    params = LANGUAGES[lang]["bing_params"]
+    url = f"https://www.bing.com/news/search?q={encoded_query}&format=rss&{params}"
 
     headers = {
         "User-Agent": (
@@ -101,6 +372,7 @@ def search_bing_news(query, num_results=5):
                 "發布日期": pub_date,
                 "連結": link,
                 "摘要": description[:150] + "..." if len(description) > 150 else description,
+                "語言": LANGUAGES[lang]["name"],
             })
         return results
     except requests.RequestException as e:
@@ -122,9 +394,10 @@ def deduplicate_results(results):
 
 def display_results(category, results):
     """以中文格式顯示搜尋結果"""
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"📂 分類：{category}")
-    print(f"{'='*60}")
+    print(f"   {CATEGORY_DESCRIPTIONS.get(category, '')}")
+    print(f"{'='*70}")
 
     if not results:
         print("  找不到相關新聞。")
@@ -132,32 +405,43 @@ def display_results(category, results):
 
     for i, item in enumerate(results, 1):
         print(f"\n  📰 [{i}] {item['標題']}")
-        print(f"     來源：{item['來源']}")
+        print(f"     來源：{item['來源']}  |  語言：{item['語言']}")
         print(f"     日期：{item['發布日期']}")
         if item.get("摘要"):
             print(f"     摘要：{item['摘要']}")
         print(f"     🔗 {item['連結']}")
 
 
-def save_results_json(all_results, filename="animal_news_results.json"):
+def save_results_json(all_results, languages, filename=None):
     """將結果儲存為 JSON 檔案"""
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"animal_news_{timestamp}.json"
+
     output = {
         "搜尋時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "搜尋語言": [LANGUAGES[lang]["name"] for lang in languages],
         "結果": all_results,
     }
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
     print(f"\n💾 結果已儲存至：{filename}")
+    return filename
 
 
-def run_search(categories=None, num_results=5, save=False):
+def run_search(categories=None, languages=None, num_results=10, save=False):
     """執行新聞搜尋"""
     if categories is None:
         categories = list(KEYWORD_CATEGORIES.keys())
+    if languages is None:
+        languages = ["en"]
 
-    print("🔍 動物新聞搜尋器")
+    print("\n" + "=" * 70)
+    print("🔍 動物新聞監測器 — Animal News Monitor")
     print(f"📅 搜尋時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📋 搜尋分類：{', '.join(categories)}")
+    print(f"🌐 搜尋語言：{', '.join(LANGUAGES[l]['name'] for l in languages)}")
+    print(f"📋 搜尋類別：{', '.join(categories)}")
+    print("=" * 70)
 
     all_results = {}
 
@@ -166,15 +450,16 @@ def run_search(categories=None, num_results=5, save=False):
             print(f"\n⚠ 未知分類：{category}，跳過。")
             continue
 
-        keywords = KEYWORD_CATEGORIES[category]
         category_results = []
 
-        for keyword in keywords:
-            print(f"\n  🔎 正在搜尋：{keyword} ...")
-            results = search_google_news(keyword, num_results=3)
-            if not results:
-                results = search_bing_news(keyword, num_results=3)
-            category_results.extend(results)
+        for lang in languages:
+            keywords = KEYWORD_CATEGORIES[category].get(lang, [])
+            for keyword in keywords:
+                print(f"  🔎 [{LANGUAGES[lang]['name'][:2]}] 正在搜尋：{keyword} ...")
+                results = search_google_news(keyword, lang=lang, num_results=3)
+                if not results:
+                    results = search_bing_news(keyword, lang=lang, num_results=3)
+                category_results.extend(results)
 
         category_results = deduplicate_results(category_results)
         category_results = category_results[:num_results]
@@ -182,20 +467,22 @@ def run_search(categories=None, num_results=5, save=False):
         display_results(category, category_results)
 
     if save:
-        save_results_json(all_results)
+        save_results_json(all_results, languages)
 
     # 統計摘要
     total = sum(len(v) for v in all_results.values())
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"📊 搜尋完成！共找到 {total} 則不重複新聞。")
-    print(f"{'='*60}")
+    by_cat = "  ".join(f"{k}: {len(v)}則" for k, v in all_results.items())
+    print(f"   {by_cat}")
+    print(f"{'='*70}")
 
     return all_results
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="動物新聞搜尋器 - 搜尋動物、動物福利、動物研究相關新聞"
+        description="動物新聞監測器 — 專為動保團體設計，監測五大動物類別新聞"
     )
     parser.add_argument(
         "-c", "--category",
@@ -203,6 +490,13 @@ def main():
         choices=list(KEYWORD_CATEGORIES.keys()),
         default=None,
         help="選擇搜尋分類（預設：全部）",
+    )
+    parser.add_argument(
+        "-l", "--language",
+        nargs="+",
+        choices=list(LANGUAGES.keys()),
+        default=None,
+        help="選擇搜尋語言：en, ja, ko, zh（預設：互動選擇）",
     )
     parser.add_argument(
         "-n", "--num-results",
@@ -221,23 +515,51 @@ def main():
         default=None,
         help="自訂搜尋關鍵字",
     )
+    parser.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="略過互動式選單，使用預設值或命令列參數",
+    )
 
     args = parser.parse_args()
 
+    # 決定語言
+    if args.language:
+        languages = args.language
+    elif args.no_interactive or args.keyword:
+        languages = ["en"]
+    else:
+        languages = prompt_language_selection()
+
+    # 自訂關鍵字搜尋
     if args.keyword:
         print(f"\n🔍 自訂搜尋：{args.keyword}")
-        results = search_google_news(args.keyword, num_results=args.num_results)
-        if not results:
-            results = search_bing_news(args.keyword, num_results=args.num_results)
-        display_results("自訂搜尋", results)
+        all_lang_results = []
+        for lang in languages:
+            results = search_google_news(args.keyword, lang=lang, num_results=args.num_results)
+            if not results:
+                results = search_bing_news(args.keyword, lang=lang, num_results=args.num_results)
+            all_lang_results.extend(results)
+        all_lang_results = deduplicate_results(all_lang_results)
+        display_results("自訂搜尋", all_lang_results)
         if args.save:
-            save_results_json({"自訂搜尋": results})
+            save_results_json({"自訂搜尋": all_lang_results}, languages)
+        return
+
+    # 決定類別
+    if args.category:
+        categories = args.category
+    elif args.no_interactive:
+        categories = list(KEYWORD_CATEGORIES.keys())
     else:
-        run_search(
-            categories=args.category,
-            num_results=args.num_results,
-            save=args.save,
-        )
+        categories = prompt_category_selection()
+
+    run_search(
+        categories=categories,
+        languages=languages,
+        num_results=args.num_results,
+        save=args.save,
+    )
 
 
 if __name__ == "__main__":
