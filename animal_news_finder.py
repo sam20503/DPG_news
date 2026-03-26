@@ -9,12 +9,19 @@
 
 import argparse
 import json
+import math
 import sys
 import urllib.parse
 from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
+
+# ============================================================
+# 設定
+# ============================================================
+PAGE_SIZE = 10  # 每頁顯示筆數
+DEFAULT_TOTAL = 50  # 預設每分類搜尋總筆數
 
 # ============================================================
 # 語言設定
@@ -298,7 +305,7 @@ def prompt_category_selection():
     return selected
 
 
-def search_google_news(query, lang="en", num_results=5):
+def search_google_news(query, lang="en", num_results=10):
     """透過 Google News RSS 搜尋新聞"""
     encoded_query = urllib.parse.quote(query)
     params = LANGUAGES[lang]["google_params"]
@@ -338,7 +345,7 @@ def search_google_news(query, lang="en", num_results=5):
         return []
 
 
-def search_bing_news(query, lang="en", num_results=5):
+def search_bing_news(query, lang="en", num_results=10):
     """透過 Bing News RSS 搜尋新聞（備用來源）"""
     encoded_query = urllib.parse.quote(query)
     params = LANGUAGES[lang]["bing_params"]
@@ -392,24 +399,83 @@ def deduplicate_results(results):
     return unique
 
 
-def display_results(category, results):
-    """以中文格式顯示搜尋結果"""
-    print(f"\n{'='*70}")
-    print(f"📂 分類：{category}")
-    print(f"   {CATEGORY_DESCRIPTIONS.get(category, '')}")
-    print(f"{'='*70}")
+def display_page(items, page, total_pages, category=""):
+    """顯示單頁結果"""
+    start = (page - 1) * PAGE_SIZE
+    end = min(start + PAGE_SIZE, len(items))
+    page_items = items[start:end]
 
-    if not results:
+    if category:
+        print(f"\n{'='*70}")
+        print(f"📂 分類：{category}")
+        print(f"   {CATEGORY_DESCRIPTIONS.get(category, '')}")
+        print(f"   共 {len(items)} 則新聞  |  第 {page}/{total_pages} 頁（每頁 {PAGE_SIZE} 則）")
+        print(f"{'='*70}")
+
+    if not page_items:
         print("  找不到相關新聞。")
         return
 
-    for i, item in enumerate(results, 1):
+    for i, item in enumerate(page_items, start + 1):
         print(f"\n  📰 [{i}] {item['標題']}")
         print(f"     來源：{item['來源']}  |  語言：{item['語言']}")
         print(f"     日期：{item['發布日期']}")
         if item.get("摘要"):
             print(f"     摘要：{item['摘要']}")
         print(f"     🔗 {item['連結']}")
+
+
+def paginate_results(items, category=""):
+    """互動式分頁瀏覽"""
+    if not items:
+        print(f"\n{'='*70}")
+        print(f"📂 分類：{category}")
+        print(f"   {CATEGORY_DESCRIPTIONS.get(category, '')}")
+        print(f"{'='*70}")
+        print("  找不到相關新聞。")
+        return
+
+    total_pages = math.ceil(len(items) / PAGE_SIZE)
+    current_page = 1
+
+    while True:
+        display_page(items, current_page, total_pages, category)
+
+        # 顯示導覽選項
+        print(f"\n{'─'*70}")
+        nav_options = []
+        if current_page > 1:
+            nav_options.append("P: 上一頁")
+        if current_page < total_pages:
+            nav_options.append("N: 下一頁")
+        nav_options.append(f"1-{total_pages}: 跳至指定頁")
+        nav_options.append("Q: 離開此分類")
+        print(f"  📄 第 {current_page}/{total_pages} 頁  |  {' | '.join(nav_options)}")
+
+        if current_page >= total_pages and total_pages == 1:
+            # 只有一頁，不需要分頁操作
+            break
+
+        try:
+            choice = input("\n  請輸入選項: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if choice == "n" and current_page < total_pages:
+            current_page += 1
+        elif choice == "p" and current_page > 1:
+            current_page -= 1
+        elif choice == "q" or choice == "":
+            break
+        elif choice.isdigit():
+            target = int(choice)
+            if 1 <= target <= total_pages:
+                current_page = target
+            else:
+                print(f"  ⚠ 頁碼需在 1-{total_pages} 之間")
+        else:
+            print("  ⚠ 無效選項，請重新輸入")
 
 
 def save_results_json(all_results, languages, filename=None):
@@ -429,18 +495,31 @@ def save_results_json(all_results, languages, filename=None):
     return filename
 
 
-def run_search(categories=None, languages=None, num_results=10, save=False):
+def run_search(categories=None, languages=None, num_results=50, save=False):
     """執行新聞搜尋"""
     if categories is None:
         categories = list(KEYWORD_CATEGORIES.keys())
     if languages is None:
         languages = ["en"]
 
+    # 計算每個關鍵字應抓取的數量（確保總數足夠）
+    max_keywords = max(
+        len(KEYWORD_CATEGORIES[cat].get(lang, []))
+        for cat in categories if cat in KEYWORD_CATEGORIES
+        for lang in languages
+    ) or 1
+    total_keywords_per_cat = sum(
+        len(KEYWORD_CATEGORIES[cat].get(lang, []))
+        for lang in languages
+    ) if categories else 1
+    per_keyword = max(5, math.ceil(num_results / max(total_keywords_per_cat, 1)))
+
     print("\n" + "=" * 70)
     print("🔍 動物新聞監測器 — Animal News Monitor")
     print(f"📅 搜尋時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🌐 搜尋語言：{', '.join(LANGUAGES[l]['name'] for l in languages)}")
     print(f"📋 搜尋類別：{', '.join(categories)}")
+    print(f"📊 每分類目標：{num_results} 則（每頁 {PAGE_SIZE} 則）")
     print("=" * 70)
 
     all_results = {}
@@ -456,15 +535,17 @@ def run_search(categories=None, languages=None, num_results=10, save=False):
             keywords = KEYWORD_CATEGORIES[category].get(lang, [])
             for keyword in keywords:
                 print(f"  🔎 [{LANGUAGES[lang]['name'][:2]}] 正在搜尋：{keyword} ...")
-                results = search_google_news(keyword, lang=lang, num_results=3)
+                results = search_google_news(keyword, lang=lang, num_results=per_keyword)
                 if not results:
-                    results = search_bing_news(keyword, lang=lang, num_results=3)
+                    results = search_bing_news(keyword, lang=lang, num_results=per_keyword)
                 category_results.extend(results)
 
         category_results = deduplicate_results(category_results)
         category_results = category_results[:num_results]
         all_results[category] = category_results
-        display_results(category, category_results)
+
+        # 使用分頁顯示
+        paginate_results(category_results, category)
 
     if save:
         save_results_json(all_results, languages)
@@ -477,7 +558,45 @@ def run_search(categories=None, languages=None, num_results=10, save=False):
     print(f"   {by_cat}")
     print(f"{'='*70}")
 
+    # 搜尋後總覽操作
+    if total > 0:
+        post_search_menu(all_results, languages)
+
     return all_results
+
+
+def post_search_menu(all_results, languages):
+    """搜尋完成後的總覽選單"""
+    categories = list(all_results.keys())
+
+    while True:
+        print(f"\n{'─'*70}")
+        print("📋 操作選單：")
+        for i, cat in enumerate(categories, 1):
+            count = len(all_results[cat])
+            print(f"  [{i}] 重新瀏覽 {cat}（{count} 則）")
+        print(f"  [S] 儲存全部結果為 JSON")
+        print(f"  [Q] 結束程式")
+
+        try:
+            choice = input("\n  請輸入選項: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if choice == "q" or choice == "":
+            break
+        elif choice == "s":
+            save_results_json(all_results, languages)
+        elif choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(categories):
+                cat = categories[idx - 1]
+                paginate_results(all_results[cat], cat)
+            else:
+                print(f"  ⚠ 請輸入 1-{len(categories)} 之間的數字")
+        else:
+            print("  ⚠ 無效選項")
 
 
 def main():
@@ -501,8 +620,14 @@ def main():
     parser.add_argument(
         "-n", "--num-results",
         type=int,
-        default=10,
-        help="每個分類顯示的新聞數量（預設：10）",
+        default=DEFAULT_TOTAL,
+        help=f"每個分類搜尋的新聞數量（預設：{DEFAULT_TOTAL}）",
+    )
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=PAGE_SIZE,
+        help=f"每頁顯示筆數（預設：{PAGE_SIZE}）",
     )
     parser.add_argument(
         "-s", "--save",
@@ -523,6 +648,10 @@ def main():
 
     args = parser.parse_args()
 
+    # 設定每頁筆數
+    global PAGE_SIZE
+    PAGE_SIZE = args.page_size
+
     # 決定語言
     if args.language:
         languages = args.language
@@ -541,7 +670,7 @@ def main():
                 results = search_bing_news(args.keyword, lang=lang, num_results=args.num_results)
             all_lang_results.extend(results)
         all_lang_results = deduplicate_results(all_lang_results)
-        display_results("自訂搜尋", all_lang_results)
+        paginate_results(all_lang_results, "自訂搜尋")
         if args.save:
             save_results_json({"自訂搜尋": all_lang_results}, languages)
         return
