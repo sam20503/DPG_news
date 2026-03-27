@@ -238,6 +238,11 @@ KEYWORD_CATEGORIES = {
     },
 }
 
+def _set_page_size(size):
+    global PAGE_SIZE
+    PAGE_SIZE = size
+
+
 CATEGORY_DESCRIPTIONS = {
     "伴侶動物": "Companion Animals — 寵物、流浪動物、收容所、TNR、虐待案件",
     "農場動物": "Farm Animals — 畜牧業、格子籠、狹欄、屠宰、動物福利認證",
@@ -649,8 +654,8 @@ def main():
     args = parser.parse_args()
 
     # 設定每頁筆數
-    global PAGE_SIZE
-    PAGE_SIZE = args.page_size
+    page_size = args.page_size
+    _set_page_size(page_size)
 
     # 決定語言
     if args.language:
