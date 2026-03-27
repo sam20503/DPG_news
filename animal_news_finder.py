@@ -10,6 +10,7 @@
 import argparse
 import json
 import math
+import re
 import sys
 import urllib.parse
 from datetime import datetime
@@ -243,6 +244,38 @@ def _set_page_size(size):
     PAGE_SIZE = size
 
 
+def _is_chinese(text):
+    """檢查文字是否主要為中文"""
+    if not text:
+        return True
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    return chinese_chars / max(len(text.replace(" ", "")), 1) > 0.3
+
+
+def translate_to_chinese(text):
+    """使用 Google Translate 免費 API 將文字翻譯為繁體中文"""
+    if not text or _is_chinese(text):
+        return ""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "zh-TW",
+            "dt": "t",
+            "q": text,
+        }
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        result = response.json()
+        translated = "".join(part[0] for part in result[0] if part[0])
+        if translated and translated != text:
+            return translated
+    except Exception:
+        pass
+    return ""
+
+
 CATEGORY_DESCRIPTIONS = {
     "伴侶動物": "Companion Animals — 寵物、流浪動物、收容所、TNR、虐待案件",
     "農場動物": "Farm Animals — 畜牧業、格子籠、狹欄、屠宰、動物福利認證",
@@ -337,13 +370,18 @@ def search_google_news(query, lang="en", num_results=10):
             pub_date = item.pubDate.text if item.pubDate else "未知日期"
             source = item.source.text if item.source else "未知來源"
 
-            results.append({
+            entry = {
                 "標題": title,
                 "來源": source,
                 "發布日期": pub_date,
                 "連結": link,
                 "語言": LANGUAGES[lang]["name"],
-            })
+            }
+            if lang != "zh":
+                zh_title = translate_to_chinese(title)
+                if zh_title:
+                    entry["中文標題"] = zh_title
+            results.append(entry)
         return results
     except requests.RequestException as e:
         print(f"  ⚠ 搜尋 '{query}' 時發生錯誤: {e}")
@@ -378,14 +416,19 @@ def search_bing_news(query, lang="en", num_results=10):
             description_tag = item.description
             description = description_tag.text if description_tag else ""
 
-            results.append({
+            entry = {
                 "標題": title,
                 "來源": "Bing News",
                 "發布日期": pub_date,
                 "連結": link,
                 "摘要": description[:150] + "..." if len(description) > 150 else description,
                 "語言": LANGUAGES[lang]["name"],
-            })
+            }
+            if lang != "zh":
+                zh_title = translate_to_chinese(title)
+                if zh_title:
+                    entry["中文標題"] = zh_title
+            results.append(entry)
         return results
     except requests.RequestException as e:
         print(f"  ⚠ 搜尋 '{query}' 時發生錯誤: {e}")
@@ -423,6 +466,8 @@ def display_page(items, page, total_pages, category=""):
 
     for i, item in enumerate(page_items, start + 1):
         print(f"\n  📰 [{i}] {item['標題']}")
+        if item.get("中文標題"):
+            print(f"     📝 {item['中文標題']}")
         print(f"     來源：{item['來源']}  |  語言：{item['語言']}")
         print(f"     日期：{item['發布日期']}")
         if item.get("摘要"):
