@@ -513,10 +513,11 @@ def run_search(categories=None, languages=None, num_results=50, save=False):
         for cat in categories if cat in KEYWORD_CATEGORIES
         for lang in languages
     ) or 1
+    first_cat = categories[0] if categories else None
     total_keywords_per_cat = sum(
-        len(KEYWORD_CATEGORIES[cat].get(lang, []))
+        len(KEYWORD_CATEGORIES[first_cat].get(lang, []))
         for lang in languages
-    ) if categories else 1
+    ) if first_cat and first_cat in KEYWORD_CATEGORIES else 1
     per_keyword = max(5, math.ceil(num_results / max(total_keywords_per_cat, 1)))
 
     print("\n" + "=" * 70)
