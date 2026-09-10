@@ -10,7 +10,6 @@
 import argparse
 import json
 import math
-import re
 import sys
 import urllib.parse
 from datetime import datetime
@@ -552,19 +551,6 @@ def run_search(categories=None, languages=None, num_results=50, save=False):
     if languages is None:
         languages = ["en"]
 
-    # 計算每個關鍵字應抓取的數量（確保總數足夠）
-    max_keywords = max(
-        len(KEYWORD_CATEGORIES[cat].get(lang, []))
-        for cat in categories if cat in KEYWORD_CATEGORIES
-        for lang in languages
-    ) or 1
-    first_cat = categories[0] if categories else None
-    total_keywords_per_cat = sum(
-        len(KEYWORD_CATEGORIES[first_cat].get(lang, []))
-        for lang in languages
-    ) if first_cat and first_cat in KEYWORD_CATEGORIES else 1
-    per_keyword = max(5, math.ceil(num_results / max(total_keywords_per_cat, 1)))
-
     print("\n" + "=" * 70)
     print("🔍 動物新聞監測器 — Animal News Monitor")
     print(f"📅 搜尋時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -581,6 +567,12 @@ def run_search(categories=None, languages=None, num_results=50, save=False):
             continue
 
         category_results = []
+
+        # 依此分類實際的關鍵字數量，計算每個關鍵字要抓幾則（確保總數足夠）
+        keyword_count = sum(
+            len(KEYWORD_CATEGORIES[category].get(lang, [])) for lang in languages
+        )
+        per_keyword = max(5, math.ceil(num_results / max(keyword_count, 1)))
 
         for lang in languages:
             keywords = KEYWORD_CATEGORIES[category].get(lang, [])

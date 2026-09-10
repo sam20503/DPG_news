@@ -21,6 +21,13 @@
 | 2 | 🇰🇷 한국어 | 亞洲動保政策參考 |
 | 3 | 🇹🇼 中文 | 台灣及華語地區新聞 |
 
+## 主要功能
+
+- **每分類預設搜尋 50 則**，以每頁 10 則分頁瀏覽
+- **分頁操作**：`N` 下一頁、`P` 上一頁、輸入頁碼跳頁、`Q` 離開該分類
+- **自動中文翻譯**：搜尋非中文新聞時，標題下方會加上 `📝` 繁體中文翻譯，方便快速選題
+- 搜尋後可重新瀏覽任一分類，或以 `S` 將結果存成 JSON
+
 ## 安裝
 
 ```bash
@@ -50,6 +57,9 @@ python animal_news_finder.py -s
 # 非互動模式（使用預設值，適合排程）
 python animal_news_finder.py --no-interactive -s
 
-# 指定每分類顯示數量
-python animal_news_finder.py -n 15
+# 指定每分類搜尋總數（預設 50）
+python animal_news_finder.py -n 100
+
+# 調整每頁筆數（預設 10）
+python animal_news_finder.py --page-size 20
 ```
